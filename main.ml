@@ -53,6 +53,15 @@ let set_raw_mode () =
 let restore_terminal old_term =
   tcsetattr Unix.stdin TCSANOW old_term;;
 
+let show_cursor () = print_string "\x1b[?25h";;
+let hide_cursor () = print_string "\x1b[?25l";;
+let clear_screen () = printf "\x1b[2J\x1b[H";;
+let set_cursor_pos ~x ~y = sprintf "\x1b[%d;%dH" y x |> print_string;;
+    
+type mode =
+  | Navigation
+  | Delete
+
 let () = 
   Sys.catch_break true;
   let loop = ref true in
@@ -60,39 +69,102 @@ let () =
   let old_term = tcgetattr Unix.stdin in
   let cur_dir = ref (getcwd ()) in
   let dirs = ref (list_dirs !cur_dir) in
+  let mode = ref Navigation in
+  let term_h = Unix.open_process_in "tput lines" |> input_line |> int_of_string in
+  let term_w = Unix.open_process_in "tput cols"  |> input_line |> int_of_string in
   let restore_term_state () =
-    print_string "\x1b[?25h"; (* Show cursor *)
-    restore_terminal old_term; in
+    clear_screen ();
+    show_cursor ();
+    restore_terminal old_term;
+  in
   set_raw_mode ();
-  print_string "\x1b[?25l"; (* Hide cursor *)
+  hide_cursor ();
   try 
     while !loop = true do
-      printf "\x1b[2J\x1b[H";  (* Clear screen *)
+      clear_screen ();
       flush stdout;
+
       print_dirs !dirs !cur_dir !focus_idx;
       flush stdout;
+
+      if !mode = Delete then (
+        let m_h = term_h / 2 in
+        let confirm_msg = "Do you want to delete this file? (y/n)" in
+        let confirm_msg_len = String.length confirm_msg in
+        let start_pos = (term_w - confirm_msg_len) / 2 in
+
+        let x = start_pos and y = m_h - 1 in set_cursor_pos x y;
+        for i = 1 to confirm_msg_len do print_string "─"; done;
+
+        let x = start_pos - 1 and y = m_h - 1 in set_cursor_pos x y;
+        print_string "╭";
+
+        let x = start_pos - 1 and y = m_h in set_cursor_pos x y;
+        print_string "│";
+
+        let x = start_pos - 1 and y = m_h + 1 in set_cursor_pos x y;
+        print_string "╰";
+
+        let x = start_pos and y = m_h in set_cursor_pos x y;
+        print_string confirm_msg;
+
+        let x = start_pos + confirm_msg_len and y = m_h - 1 in set_cursor_pos x y;
+        print_string "╮";
+
+        let x = start_pos + confirm_msg_len and y = m_h in set_cursor_pos x y;
+        print_string "│";
+
+        let x = start_pos + confirm_msg_len and y = m_h + 1 in set_cursor_pos x y;
+        print_string "╯";
+
+        let x = start_pos and y = m_h + 1 in set_cursor_pos x y;
+        for i = 1 to confirm_msg_len do print_string "─"; done;
+
+        flush stdout;
+      );
+
       let buf = Bytes.create 3 in
       let bytes_read = read Unix.stdin buf 0 3 in
       if bytes_read > 1 then
         let len = List.length !dirs in
-        match Bytes.sub_string buf 0 3 with
-          (* Arrow down *)
-          | "\x1b[B" -> if !focus_idx < len - 1
-                        then focus_idx := !focus_idx + 1
-                        else focus_idx := 0
-          (* Arrow up *)
-          | "\x1b[A" -> if !focus_idx > 0
-                        then focus_idx := !focus_idx - 1
-                        else focus_idx := len - 1;
-          | _ -> ();
+        let usr_input = Bytes.sub_string buf 0 3 in
+        match usr_input, !mode with
+          | "\x1b[B", Navigation -> (* Arrow down *)
+              if !focus_idx < len - 1
+              then focus_idx := !focus_idx + 1
+              else focus_idx := 0;
+          | "\x1b[A", Navigation -> (* Arrow up *)
+              if !focus_idx > 0
+              then focus_idx := !focus_idx - 1
+              else focus_idx := len - 1;
+          | _, _ -> ();
       else
-        match Bytes.get buf 0 with
-          | 'q' -> loop := false; restore_term_state ();
-          | '\n' -> let selected_dir = List.nth !dirs !focus_idx in
-                    cur_dir := !cur_dir ^ "/" ^ selected_dir;
-                    dirs := list_dirs !cur_dir;
-                    focus_idx := 0;
-          | _ -> ();
+        let usr_input = Bytes.get buf 0 in
+        match usr_input, !mode  with
+          | 'q', Navigation -> 
+              loop := false;
+              restore_term_state ();
+          | '\n', Navigation ->
+              let selected_dir = List.nth !dirs !focus_idx in 
+              cur_dir := !cur_dir ^ "/" ^ selected_dir;
+              dirs := list_dirs !cur_dir;
+              focus_idx := 0;
+          | '-', Navigation ->
+              cur_dir := !cur_dir ^ "/" ^ "..";
+              dirs := list_dirs !cur_dir;
+              focus_idx := 0;
+          | 'd', Navigation ->
+              mode := Delete;
+          | 'y', Delete ->
+              let selected_file = List.nth !dirs !focus_idx in
+              let file_path = !cur_dir ^ "/" ^ selected_file in
+              unlink file_path;
+              dirs := list_dirs !cur_dir;
+              focus_idx := 0;
+              mode := Navigation;
+          | 'q', Delete | 'n', Delete -> 
+              mode := Navigation;
+          | _, _-> ();
       sleepf (1. /. 60.)
     done;
   with
