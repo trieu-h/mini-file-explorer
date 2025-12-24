@@ -58,20 +58,24 @@ let hide_cursor () = print_string "\x1b[?25l";;
 let clear_screen () = printf "\x1b[2J\x1b[H";;
 let set_cursor_pos ~x ~y = sprintf "\x1b[%d;%dH" y x |> print_string;;
     
+type delete_kind =
+  | Dir
+  | File;;
+
 type mode =
   | Navigation
-  | Delete
+  | Delete of delete_kind
 
 let () = 
   Sys.catch_break true;
   let loop = ref true in
   let focus_idx = ref 0 in
+  let term_h = Unix.open_process_in "tput lines" |> input_line |> int_of_string in
+  let term_w = Unix.open_process_in "tput cols"  |> input_line |> int_of_string in
   let old_term = tcgetattr Unix.stdin in
   let cur_dir = ref (getcwd ()) in
   let dirs = ref (list_dirs !cur_dir) in
   let mode = ref Navigation in
-  let term_h = Unix.open_process_in "tput lines" |> input_line |> int_of_string in
-  let term_w = Unix.open_process_in "tput cols"  |> input_line |> int_of_string in
   let restore_term_state () =
     clear_screen ();
     show_cursor ();
@@ -87,42 +91,46 @@ let () =
       print_dirs !dirs !cur_dir !focus_idx;
       flush stdout;
 
-      if !mode = Delete then (
-        let m_h = term_h / 2 in
-        let confirm_msg = "Do you want to delete this file? (y/n)" in
-        let confirm_msg_len = String.length confirm_msg in
-        let start_pos = (term_w - confirm_msg_len) / 2 in
+      let () = match !mode with
+        | Delete delete_kind -> 
+          begin
+            let m_h = term_h / 2 in
+            let text = if delete_kind = Dir then "directory" else "file" in
+            let confirm_msg = sprintf "Do you want to delete this %s? (y/n)" text in
+            let confirm_msg_len = String.length confirm_msg in
+            let start_pos = (term_w - confirm_msg_len) / 2 in
 
-        let x = start_pos and y = m_h - 1 in set_cursor_pos x y;
-        for i = 1 to confirm_msg_len do print_string "─"; done;
+            let x = start_pos and y = m_h - 1 in set_cursor_pos ~x ~y;
+            for i = 1 to confirm_msg_len do print_string "─"; done;
 
-        let x = start_pos - 1 and y = m_h - 1 in set_cursor_pos x y;
-        print_string "╭";
+            let x = start_pos - 1 and y = m_h - 1 in set_cursor_pos ~x ~y;
+            print_string "╭";
 
-        let x = start_pos - 1 and y = m_h in set_cursor_pos x y;
-        print_string "│";
+            let x = start_pos - 1 and y = m_h in set_cursor_pos ~x ~y;
+            print_string "│";
 
-        let x = start_pos - 1 and y = m_h + 1 in set_cursor_pos x y;
-        print_string "╰";
+            let x = start_pos - 1 and y = m_h + 1 in set_cursor_pos ~x ~y;
+            print_string "╰";
 
-        let x = start_pos and y = m_h in set_cursor_pos x y;
-        print_string confirm_msg;
+            let x = start_pos and y = m_h in set_cursor_pos ~x ~y;
+            print_string confirm_msg;
 
-        let x = start_pos + confirm_msg_len and y = m_h - 1 in set_cursor_pos x y;
-        print_string "╮";
+            let x = start_pos + confirm_msg_len and y = m_h - 1 in set_cursor_pos ~x ~y;
+            print_string "╮";
 
-        let x = start_pos + confirm_msg_len and y = m_h in set_cursor_pos x y;
-        print_string "│";
+            let x = start_pos + confirm_msg_len and y = m_h in set_cursor_pos ~x ~y;
+            print_string "│";
 
-        let x = start_pos + confirm_msg_len and y = m_h + 1 in set_cursor_pos x y;
-        print_string "╯";
+            let x = start_pos + confirm_msg_len and y = m_h + 1 in set_cursor_pos ~x ~y;
+            print_string "╯";
 
-        let x = start_pos and y = m_h + 1 in set_cursor_pos x y;
-        for i = 1 to confirm_msg_len do print_string "─"; done;
+            let x = start_pos and y = m_h + 1 in set_cursor_pos ~x ~y;
+            for i = 1 to confirm_msg_len do print_string "─"; done;
 
-        flush stdout;
-      );
-
+            flush stdout;
+          end;
+        | _ -> ();
+      in
       let buf = Bytes.create 3 in
       let bytes_read = read Unix.stdin buf 0 3 in
       if bytes_read > 1 then
@@ -140,7 +148,7 @@ let () =
           | _, _ -> ();
       else
         let usr_input = Bytes.get buf 0 in
-        match usr_input, !mode  with
+        match usr_input, !mode with
           | 'q', Navigation -> 
               loop := false;
               restore_term_state ();
@@ -154,15 +162,24 @@ let () =
               dirs := list_dirs !cur_dir;
               focus_idx := 0;
           | 'd', Navigation ->
-              mode := Delete;
-          | 'y', Delete ->
-              let selected_file = List.nth !dirs !focus_idx in
-              let file_path = !cur_dir ^ "/" ^ selected_file in
-              unlink file_path;
+              let selected_entry = List.nth !dirs !focus_idx in
+              let full_path = !cur_dir ^ "/" ^ selected_entry in
+              let { st_kind = kind } = Unix.stat full_path in
+              mode := begin match kind with
+                | S_REG -> Delete File
+                | S_DIR -> Delete Dir
+              end
+          | 'y', Delete delete_kind ->
+              let selected_entry = List.nth !dirs !focus_idx in
+              let full_path = !cur_dir ^ "/" ^ selected_entry in
+              begin
+                match delete_kind with
+                | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
+                | File -> unlink full_path;
+              end;
               dirs := list_dirs !cur_dir;
-              focus_idx := 0;
               mode := Navigation;
-          | 'q', Delete | 'n', Delete -> 
+          | 'q', Delete _ | 'n', Delete _ -> 
               mode := Navigation;
           | _, _-> ();
       sleepf (1. /. 60.)
