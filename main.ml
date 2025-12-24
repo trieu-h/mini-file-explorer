@@ -65,6 +65,7 @@ type delete_kind =
 type mode =
   | Navigation
   | Delete of delete_kind
+  | Create
 
 let () = 
   Sys.catch_break true;
@@ -76,6 +77,9 @@ let () =
   let cur_dir = ref (getcwd ()) in
   let dirs = ref (list_dirs !cur_dir) in
   let mode = ref Navigation in
+  let user_input = ref "" in
+  let user_input_view = ref "" in
+  let user_input_max_w = 50 in
   let restore_term_state () =
     clear_screen ();
     show_cursor ();
@@ -129,6 +133,42 @@ let () =
 
             flush stdout;
           end;
+        | Create ->
+          begin
+            let m_h = term_h / 2 in
+            let start_pos = (term_w - user_input_max_w) / 2 in
+
+            let x = start_pos and y = m_h - 1 in set_cursor_pos ~x ~y;
+            for i = 1 to user_input_max_w do print_string "─"; done;
+
+            let x = start_pos - 1 and y = m_h - 1 in set_cursor_pos ~x ~y;
+            print_string "╭";
+
+            let x = start_pos - 1 and y = m_h in set_cursor_pos ~x ~y;
+            print_string "│";
+
+            let x = start_pos - 1 and y = m_h + 1 in set_cursor_pos ~x ~y;
+            print_string "╰";
+
+            let x = start_pos + user_input_max_w and y = m_h - 1 in set_cursor_pos ~x ~y;
+            print_string "╮";
+
+            let x = start_pos + user_input_max_w and y = m_h in set_cursor_pos ~x ~y;
+            print_string "│";
+
+            let x = start_pos + user_input_max_w and y = m_h + 1 in set_cursor_pos ~x ~y;
+            print_string "╯";
+
+            let x = start_pos and y = m_h + 1 in set_cursor_pos ~x ~y;
+            for i = 1 to user_input_max_w do print_string "─"; done;
+
+            let x = start_pos and y = m_h in set_cursor_pos ~x ~y;
+            print_string !user_input_view;
+
+            show_cursor ();
+
+            flush stdout;
+          end;
         | _ -> ();
       in
       let buf = Bytes.create 3 in
@@ -168,7 +208,10 @@ let () =
               mode := begin match kind with
                 | S_REG -> Delete File
                 | S_DIR -> Delete Dir
+                | _ -> failwith "Not handled"
               end
+          | 'n', Navigation ->
+              mode := Create;
           | 'y', Delete delete_kind ->
               let selected_entry = List.nth !dirs !focus_idx in
               let full_path = !cur_dir ^ "/" ^ selected_entry in
@@ -177,12 +220,36 @@ let () =
                 | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
                 | File -> unlink full_path;
               end;
+              focus_idx := !focus_idx - 1;
               dirs := list_dirs !cur_dir;
               mode := Navigation;
           | 'q', Delete _ | 'n', Delete _ -> 
               mode := Navigation;
+          | '\n', Create ->
+              sprintf "mkdir %s" !user_input |> Sys.command |> ignore;
+              user_input := "";
+              user_input_view := "";
+              hide_cursor();
+              dirs := list_dirs !cur_dir;
+              mode := Navigation;
+          | c, Create ->
+              let user_input_len = String.length !user_input in
+              begin
+                user_input := match c with
+                  | '' when user_input_len > 0 -> 
+                      String.sub !user_input 0 (user_input_len - 1)
+                  | '' when user_input_len = 0 -> 
+                      ""
+                  | _  -> 
+                      !user_input ^ String.make 1 c
+              end;
+              user_input_view := 
+                if user_input_len > user_input_max_w then 
+                  String.sub !user_input (user_input_len - user_input_max_w - 1) (user_input_max_w - 1)
+                else
+                  !user_input
           | _, _-> ();
-      sleepf (1. /. 60.)
+      (* sleepf (1. /. 60.) *)
     done;
   with
   | Sys.Break -> restore_term_state ();
