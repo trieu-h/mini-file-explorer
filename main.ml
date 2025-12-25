@@ -2,13 +2,23 @@ open Unix;;
 open Printf;;
 open Stdlib;;
 
+let str_compare s1 s2 =
+  let s1 = s1 |> String.to_seq in
+  let s2 = s2 |> String.to_seq in
+  let cmp_fn c1 c2 =
+    if c1 < c2 then -1
+    else if c1 > c2 then 1
+    else 0
+  in
+  Seq.compare cmp_fn s1 s2;;
+
 let list_dirs path: string list =
   print_string path;
   flush stdout;
   let dh = opendir path in
   let rec list_dirs_rec dirs =
     match readdir dh with
-    | exception End_of_file -> closedir dh; List.rev dirs
+    | exception End_of_file -> closedir dh; List.sort str_compare dirs
     | "." -> list_dirs_rec dirs
     | dir -> list_dirs_rec (dir :: dirs)
   in
@@ -92,10 +102,10 @@ let () =
       flush stdout;
 
       let () = match !mode with
-        | Delete delete_kind -> 
+        | Delete entry_kind -> 
           begin
             let m_h = term_h / 2 in
-            let text = if delete_kind = Dir then "directory" else "file" in
+            let text = if entry_kind = Dir then "directory" else "file" in
             let confirm_msg = sprintf "Do you want to delete this %s? (y/n)" text in
             let confirm_msg_len = String.length confirm_msg in
             let start_pos = (term_w - confirm_msg_len) / 2 in
@@ -225,11 +235,11 @@ let () =
               mode := Create File;
           | 'N', Navigation ->
               mode := Create Dir;
-          | 'y', Delete delete_kind ->
+          | 'y', Delete entry_kind ->
               let selected_entry = List.nth !dirs !focus_idx in
               let full_path = !cur_dir ^ "/" ^ selected_entry in
               begin
-                match delete_kind with
+                match entry_kind with
                 | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
                 | File -> unlink full_path;
               end;
