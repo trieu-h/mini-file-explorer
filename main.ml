@@ -15,30 +15,26 @@ let list_dirs path: string list =
   list_dirs_rec [];;
 
 type color = { r: int; g: int; b: int };;
-
 let green = {r = 152; g = 195; b = 121};;
-let yellow = {r = 209; g = 154; b = 102};;
+let yellow = {r = 255; g = 209; b = 115};;
 let white = {r = 255; g = 255; b = 255};;
+let dark_blue = {r = 13; g = 16; b = 23};;
+let gray = {r = 92; g = 97; b = 101};;
+
+let text_with_color fg bg text =
+  sprintf "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m" fg.r fg.g fg.b bg.r bg.g bg.b text;;
 
 let print_dirs list_dirs cur_dir focus_idx =
   let print_dir dir_index dir = 
     let { st_kind = kind } = Unix.stat (cur_dir ^ "/" ^ dir) in
     let focused = focus_idx == dir_index in
     let fg, bg = match kind, focused with 
-    | S_DIR, true -> (white, Some green)
-    | S_DIR, false -> (green, None)
-    | S_REG, true -> (white, Some yellow)
-    | S_REG, false -> (yellow, None)
-    | _, _ -> failwith "Unreachable"
+    | S_DIR, true -> (yellow, gray)
+    | S_DIR, false -> (yellow, dark_blue)
+    | _, true -> (white, gray)
+    | _, false -> (white, dark_blue)
     in
-    let text_with_color fg_color bg_color text =
-      match fg_color, bg_color with
-       | { r = fg_r; g = fg_g; b = fg_b}, None ->
-           sprintf "\x1b[38;2;%d;%d;%dm%s\x1b[0m\n" fg_r fg_g fg_b text
-       | { r = fg_r; g = fg_g; b = fg_b}, Some { r = bg_r; g = bg_g; b = bg_b } ->
-           sprintf "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m\n" fg_r fg_g fg_b bg_r bg_g bg_b text
-    in
-    text_with_color fg bg dir |> print_string
+    text_with_color fg bg dir ^ "\n" |> print_string
   in
     List.iteri print_dir list_dirs;;
 
@@ -58,14 +54,14 @@ let hide_cursor () = print_string "\x1b[?25l";;
 let clear_screen () = printf "\x1b[2J\x1b[H";;
 let set_cursor_pos ~x ~y = sprintf "\x1b[%d;%dH" y x |> print_string;;
     
-type delete_kind =
+type entry_kind =
   | Dir
   | File;;
 
 type mode =
   | Navigation
-  | Delete of delete_kind
-  | Create
+  | Delete of entry_kind
+  | Create of entry_kind;;
 
 let () = 
   Sys.catch_break true;
@@ -105,62 +101,77 @@ let () =
             let start_pos = (term_w - confirm_msg_len) / 2 in
 
             let x = start_pos and y = m_h - 1 in set_cursor_pos ~x ~y;
-            for i = 1 to confirm_msg_len do print_string "─"; done;
+            for i = 1 to confirm_msg_len do 
+              "─" |> text_with_color green dark_blue |> print_string;
+            done;
 
             let x = start_pos - 1 and y = m_h - 1 in set_cursor_pos ~x ~y;
-            print_string "╭";
+            "╭" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos - 1 and y = m_h in set_cursor_pos ~x ~y;
-            print_string "│";
+            "│" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos - 1 and y = m_h + 1 in set_cursor_pos ~x ~y;
-            print_string "╰";
+            "╰" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos and y = m_h in set_cursor_pos ~x ~y;
             print_string confirm_msg;
 
             let x = start_pos + confirm_msg_len and y = m_h - 1 in set_cursor_pos ~x ~y;
-            print_string "╮";
+            "╮" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos + confirm_msg_len and y = m_h in set_cursor_pos ~x ~y;
-            print_string "│";
+            "│" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos + confirm_msg_len and y = m_h + 1 in set_cursor_pos ~x ~y;
-            print_string "╯";
+            "╯" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos and y = m_h + 1 in set_cursor_pos ~x ~y;
-            for i = 1 to confirm_msg_len do print_string "─"; done;
+            for i = 1 to confirm_msg_len do 
+              "─" |> text_with_color green dark_blue |> print_string;
+            done;
 
             flush stdout;
           end;
-        | Create ->
+        | Create kind ->
           begin
             let m_h = term_h / 2 in
             let start_pos = (term_w - user_input_max_w) / 2 in
 
             let x = start_pos and y = m_h - 1 in set_cursor_pos ~x ~y;
-            for i = 1 to user_input_max_w do print_string "─"; done;
+            for i = 1 to user_input_max_w do 
+              "─" |> text_with_color green dark_blue |> print_string;
+            done;
+
+            let x = start_pos + 1 and y = m_h - 1 in set_cursor_pos ~x ~y;
+            let label = match kind with 
+              | Dir -> "Enter directory name"
+              | File -> "Enter file name"
+            in
+            label |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos - 1 and y = m_h - 1 in set_cursor_pos ~x ~y;
-            print_string "╭";
+            "╭" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos - 1 and y = m_h in set_cursor_pos ~x ~y;
-            print_string "│";
+            "│" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos - 1 and y = m_h + 1 in set_cursor_pos ~x ~y;
-            print_string "╰";
+            "╰" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos + user_input_max_w and y = m_h - 1 in set_cursor_pos ~x ~y;
-            print_string "╮";
+            "╮" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos + user_input_max_w and y = m_h in set_cursor_pos ~x ~y;
-            print_string "│";
+            "│" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos + user_input_max_w and y = m_h + 1 in set_cursor_pos ~x ~y;
-            print_string "╯";
+            "╯" |> text_with_color green dark_blue |> print_string;
 
             let x = start_pos and y = m_h + 1 in set_cursor_pos ~x ~y;
-            for i = 1 to user_input_max_w do print_string "─"; done;
+            for i = 1 to user_input_max_w do 
+              "─" |> text_with_color green dark_blue |> print_string;
+            done;
 
             let x = start_pos and y = m_h in set_cursor_pos ~x ~y;
             print_string !user_input_view;
@@ -211,7 +222,9 @@ let () =
                 | _ -> failwith "Not handled"
               end
           | 'n', Navigation ->
-              mode := Create;
+              mode := Create File;
+          | 'N', Navigation ->
+              mode := Create Dir;
           | 'y', Delete delete_kind ->
               let selected_entry = List.nth !dirs !focus_idx in
               let full_path = !cur_dir ^ "/" ^ selected_entry in
@@ -225,14 +238,18 @@ let () =
               mode := Navigation;
           | 'q', Delete _ | 'n', Delete _ -> 
               mode := Navigation;
-          | '\n', Create ->
-              sprintf "mkdir %s" !user_input |> Sys.command |> ignore;
+          | '\n', Create kind ->
+              if kind = Dir then (
+                sprintf "mkdir %s" !user_input |> Sys.command |> ignore;
+              ) else (
+                sprintf "touch %s" !user_input |> Sys.command |> ignore;
+              );
               user_input := "";
               user_input_view := "";
               hide_cursor();
               dirs := list_dirs !cur_dir;
               mode := Navigation;
-          | c, Create ->
+          | c, Create _ ->
               let user_input_len = String.length !user_input in
               begin
                 user_input := match c with
