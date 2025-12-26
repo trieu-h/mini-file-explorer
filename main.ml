@@ -13,8 +13,6 @@ let str_compare s1 s2 =
   Seq.compare cmp_fn s1 s2;;
 
 let list_dirs path: string list =
-  print_string path;
-  flush stdout;
   let dh = opendir path in
   let rec list_dirs_rec dirs =
     match readdir dh with
@@ -24,12 +22,12 @@ let list_dirs path: string list =
   in
   list_dirs_rec [];;
 
-type color = { r: int; g: int; b: int };;
+type color = {r: int; g: int; b: int};;
 let green = {r = 152; g = 195; b = 121};;
 let yellow = {r = 255; g = 209; b = 115};;
 let white = {r = 255; g = 255; b = 255};;
-let dark_blue = {r = 13; g = 16; b = 23};;
 let gray = {r = 92; g = 97; b = 101};;
+let black = {r = 0; g = 0; b = 0};;
 
 let text_with_color fg bg text =
   sprintf "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m" fg.r fg.g fg.b bg.r bg.g bg.b text;;
@@ -40,9 +38,9 @@ let print_dirs list_dirs cur_dir focus_idx =
     let focused = focus_idx == dir_index in
     let fg, bg = match kind, focused with 
     | S_DIR, true -> (yellow, gray)
-    | S_DIR, false -> (yellow, dark_blue)
+    | S_DIR, false -> (yellow, black)
     | _, true -> (white, gray)
-    | _, false -> (white, dark_blue)
+    | _, false -> (white, black)
     in
     text_with_color fg bg dir ^ "\n" |> print_string
   in
@@ -61,39 +59,39 @@ let restore_terminal old_term =
 
 let show_cursor () = print_string "\x1b[?25h";;
 let hide_cursor () = print_string "\x1b[?25l";;
-let clear_screen () = print_string "\x1b[2J\x1b[H";;
+let clear_screen () = print_string "\x1b[48;2;0;0;0m\x1b[2J\x1b[H";;
 let set_cursor_pos ~x ~y = sprintf "\x1b[%d;%dH" y x |> print_string;;
 let draw_border x y w h =
     set_cursor_pos ~x ~y;
-    "╭" |> text_with_color green dark_blue |> print_string;
+    "╭" |> text_with_color green black |> print_string;
 
     set_cursor_pos ~x:(x+1) ~y;
     for i = 0 to w-1 do 
-      "─" |> text_with_color green dark_blue |> print_string;
+      "─" |> text_with_color green black |> print_string;
     done;
 
     set_cursor_pos ~x:(x+w+1) ~y;
-    "╮" |> text_with_color green dark_blue |> print_string;
+    "╮" |> text_with_color green black|> print_string;
 
     for i = 0 to h do 
       set_cursor_pos ~x ~y:(y+h);
-      "│" |> text_with_color green dark_blue |> print_string;
+      "│" |> text_with_color green black |> print_string;
     done;
 
     set_cursor_pos ~x ~y:(y+h+1);
-    "╰" |> text_with_color green dark_blue |> print_string;
+    "╰" |> text_with_color green black |> print_string;
 
     for i = 0 to h do 
       set_cursor_pos ~x:(x+w+1) ~y:(y+h);
-      "│" |> text_with_color green dark_blue |> print_string;
+      "│" |> text_with_color green black |> print_string;
     done;
 
     set_cursor_pos ~x:(x+w+1) ~y:(y+h+1);
-    "╯" |> text_with_color green dark_blue |> print_string;
+    "╯" |> text_with_color green black |> print_string;
 
     set_cursor_pos ~x:(x+1) ~y:(y+h+1);
     for i = 0 to w-1 do 
-      "─" |> text_with_color green dark_blue |> print_string;
+      "─" |> text_with_color green black |> print_string;
     done;
     
 type entry_kind =
@@ -128,10 +126,7 @@ let () =
   try 
     while !loop = true do
       clear_screen ();
-      flush stdout;
-
       print_dirs !dirs !cur_dir !focus_idx;
-      flush stdout;
 
       let () = match !mode with
         | Delete entry_kind -> 
@@ -144,7 +139,6 @@ let () =
             draw_border (confirm_msg_x-1) (confirm_msg_y-1) confirm_msg_len 1; 
             set_cursor_pos ~x:confirm_msg_x ~y:confirm_msg_y;
             print_string confirm_msg;
-            flush stdout;
           end;
         | Create entry_kind ->
           begin
@@ -158,16 +152,16 @@ let () =
               | Dir -> "Create directory"
               | File -> "Create file"
             in
-            label |> text_with_color green dark_blue |> print_string;
+            label |> text_with_color green black |> print_string;
 
             set_cursor_pos ~x:input_x ~y:input_y;
             print_string !user_input_view;
 
             show_cursor ();
-            flush stdout;
           end;
         | _ -> ();
       in
+      flush stdout;
       let buf = Bytes.create 3 in
       let bytes_read = read Unix.stdin buf 0 3 in
       if bytes_read > 1 then
@@ -235,24 +229,25 @@ let () =
               hide_cursor();
               dirs := list_dirs !cur_dir;
               mode := Navigation;
-          | c, Create _ ->
+          | key, Create _ ->
               let user_input_len = String.length !user_input in
               begin
-                user_input := match c with
+                user_input := match key with
                   | '' when user_input_len > 0 -> 
                       String.sub !user_input 0 (user_input_len - 1)
                   | '' when user_input_len = 0 -> 
                       ""
                   | _  -> 
-                      !user_input ^ String.make 1 c
+                      !user_input ^ String.make 1 key
               end;
-              user_input_view := 
-                if user_input_len > user_input_max_w then 
-                  String.sub !user_input (user_input_len - user_input_max_w - 1) (user_input_max_w - 1)
+
+              let user_input_len = String.length !user_input in
+              user_input_view :=
+                if user_input_len >= user_input_max_w then
+                  String.sub !user_input (user_input_len - user_input_max_w + 1) (user_input_max_w - 1)
                 else
-                  !user_input
+                !user_input;
           | _, _-> ();
-      (* sleepf (1. /. 60.) *)
     done;
   with
   | Sys.Break -> restore_term_state ();
