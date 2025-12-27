@@ -33,10 +33,10 @@ let text_with_color fg bg text =
   sprintf "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m" fg.r fg.g fg.b bg.r bg.g bg.b text;;
 
 let print_dirs list_dirs cur_dir focus_idx =
-  let print_dir dir_index dir = 
+  let print_dir dir_index dir =
     let { st_kind = kind } = Unix.stat (cur_dir ^ "/" ^ dir) in
     let focused = focus_idx == dir_index in
-    let fg, bg = match kind, focused with 
+    let fg, bg = match kind, focused with
     | S_DIR, true -> (yellow, gray)
     | S_DIR, false -> (yellow, black)
     | _, true -> (white, gray)
@@ -66,14 +66,14 @@ let draw_border x y w h =
     "╭" |> text_with_color green black |> print_string;
 
     set_cursor_pos ~x:(x+1) ~y;
-    for i = 0 to w-1 do 
+    for i = 0 to w-1 do
       "─" |> text_with_color green black |> print_string;
     done;
 
     set_cursor_pos ~x:(x+w+1) ~y;
     "╮" |> text_with_color green black|> print_string;
 
-    for i = 0 to h do 
+    for i = 0 to h do
       set_cursor_pos ~x ~y:(y+h);
       "│" |> text_with_color green black |> print_string;
     done;
@@ -81,7 +81,7 @@ let draw_border x y w h =
     set_cursor_pos ~x ~y:(y+h+1);
     "╰" |> text_with_color green black |> print_string;
 
-    for i = 0 to h do 
+    for i = 0 to h do
       set_cursor_pos ~x:(x+w+1) ~y:(y+h);
       "│" |> text_with_color green black |> print_string;
     done;
@@ -90,7 +90,7 @@ let draw_border x y w h =
     "╯" |> text_with_color green black |> print_string;
 
     set_cursor_pos ~x:(x+1) ~y:(y+h+1);
-    for i = 0 to w-1 do 
+    for i = 0 to w-1 do
       "─" |> text_with_color green black |> print_string;
     done;
 
@@ -105,7 +105,7 @@ type key = [
 let parse_input () =
   let buf = Bytes.create 3 in
   let bytes_read = read Unix.stdin buf 0 3 in
-  if bytes_read > 1 then 
+  if bytes_read > 1 then
     let input = Bytes.sub_string buf 0 bytes_read in
     match input with
      | "\x1b[B" -> `Arrow_down
@@ -117,7 +117,9 @@ let parse_input () =
     | _ ->
       let input_bytes = Bytes.make 1 input in
       if input_bytes = Bytes.of_string "\x1b" then `Escape else `Key input;;
-    
+
+let process_input input = "\"" ^ String.escaped input ^ "\"";;
+
 type entry_kind =
   | Dir
   | File;;
@@ -127,7 +129,7 @@ type mode =
   | Delete of entry_kind
   | Create of entry_kind;;
 
-let () = 
+let () =
   Sys.catch_break true;
   let loop = ref true in
   let focus_idx = ref 0 in
@@ -147,20 +149,20 @@ let () =
   in
   set_raw_mode ();
   hide_cursor ();
-  try 
+  try
     while !loop = true do
       clear_screen ();
       print_dirs !dirs !cur_dir !focus_idx;
 
       let () = match !mode with
-        | Delete entry_kind -> 
+        | Delete entry_kind ->
           begin
             let kind = if entry_kind = Dir then "directory" else "file" in
             let confirm_msg = sprintf "Do you want to delete this %s? (y/n)" kind in
             let confirm_msg_len = String.length confirm_msg in
             let confirm_msg_x = (term_w - confirm_msg_len) / 2 in
             let confirm_msg_y = term_h / 2 in
-            draw_border (confirm_msg_x-1) (confirm_msg_y-1) confirm_msg_len 1; 
+            draw_border (confirm_msg_x-1) (confirm_msg_y-1) confirm_msg_len 1;
             set_cursor_pos ~x:confirm_msg_x ~y:confirm_msg_y;
             print_string confirm_msg;
           end;
@@ -172,7 +174,7 @@ let () =
             draw_border (input_x-1) (input_y-1) user_input_max_w 1;
 
             set_cursor_pos ~x:(input_x+1) ~y:(input_y-1);
-            let label = match entry_kind with 
+            let label = match entry_kind with
               | Dir -> "Create directory"
               | File -> "Create file"
             in
@@ -203,7 +205,7 @@ let () =
                 loop := false;
                 restore_term_state ()
             | `Enter ->
-                let selected_dir = List.nth !dirs !focus_idx in 
+                let selected_dir = List.nth !dirs !focus_idx in
                 cur_dir := !cur_dir ^ "/" ^ selected_dir;
                 dirs := list_dirs !cur_dir;
                 focus_idx := 0
@@ -230,26 +232,29 @@ let () =
             | `Enter | `Key 'y' ->
                 let selected_entry = List.nth !dirs !focus_idx in
                 let full_path = !cur_dir ^ "/" ^ selected_entry in
+                let processed_path = process_input selected_entry in
                 begin
                   match kind with
-                  | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
-                  | File -> unlink full_path;
+                  | Dir -> sprintf "rm -rf %s" processed_path |> Sys.command |> ignore;
+                  | File -> sprintf "rm %s" processed_path |> Sys.command |> ignore;
                 end;
                 focus_idx := !focus_idx - 1;
                 dirs := list_dirs !cur_dir;
                 mode := Navigation
-            | `Key 'q' | `Key 'n' | `Escape -> 
+            | `Key 'q' | `Key 'n' | `Escape ->
                 mode := Navigation
             | _ -> ()
         )
         | Create kind ->
           match key with
             | `Enter ->
+                let processed_input = process_input !user_input in
                 if kind = Dir then (
-                  sprintf "mkdir %s" !user_input |> Sys.command |> ignore;
+                  sprintf "mkdir %s" processed_input |> Sys.command |> ignore
                 ) else (
-                  sprintf "touch %s" !user_input |> Sys.command |> ignore;
+                  sprintf "touch %s" processed_input |> Sys.command |> ignore
                 );
+
                 user_input := "";
                 user_input_view := "";
                 hide_cursor();
@@ -259,11 +264,11 @@ let () =
                 let user_input_len = String.length !user_input in
                 begin
                   user_input := match key with
-                    | '' when user_input_len > 0 -> 
+                    | '' when user_input_len > 0 ->
                         String.sub !user_input 0 (user_input_len - 1)
-                    | '' when user_input_len = 0 -> 
+                    | '' when user_input_len = 0 ->
                         ""
-                    | _  -> 
+                    | _  ->
                         !user_input ^ String.make 1 key
                 end;
 
@@ -278,5 +283,10 @@ let () =
             | _ -> ()
     done;
   with
-  | Sys.Break -> restore_term_state ();
+  | Sys.Break ->
+      restore_term_state ();
+      exit 0;
+  | _ ->
+      restore_term_state ();
+      exit 1;
 
