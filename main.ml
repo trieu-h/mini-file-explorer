@@ -93,6 +93,30 @@ let draw_border x y w h =
     for i = 0 to w-1 do 
       "─" |> text_with_color green black |> print_string;
     done;
+
+type key = [
+  |`Arrow_down
+  |`Arrow_up
+  |`Escape
+  |`Enter
+  |`Key of char
+];;
+
+let parse_input () =
+  let buf = Bytes.create 3 in
+  let bytes_read = read Unix.stdin buf 0 3 in
+  if bytes_read > 1 then 
+    let input = Bytes.sub_string buf 0 bytes_read in
+    match input with
+     | "\x1b[B" -> `Arrow_down
+     | "\x1b[A" -> `Arrow_up
+  else
+    let input = Bytes.get buf 0 in
+    match input with
+    | '\n' -> `Enter
+    | _ ->
+      let input_bytes = Bytes.make 1 input in
+      if input_bytes = Bytes.of_string "\x1b" then `Escape else `Key input;;
     
 type entry_kind =
   | Dir
@@ -162,92 +186,96 @@ let () =
         | _ -> ();
       in
       flush stdout;
-      let buf = Bytes.create 3 in
-      let bytes_read = read Unix.stdin buf 0 3 in
-      if bytes_read > 1 then
-        let len = List.length !dirs in
-        let usr_input = Bytes.sub_string buf 0 3 in
-        match usr_input, !mode with
-          | "\x1b[B", Navigation -> (* Arrow down *)
-              if !focus_idx < len - 1
-              then focus_idx := !focus_idx + 1
-              else focus_idx := 0;
-          | "\x1b[A", Navigation -> (* Arrow up *)
-              if !focus_idx > 0
-              then focus_idx := !focus_idx - 1
-              else focus_idx := len - 1;
-          | _, _ -> ();
-      else
-        let usr_input = Bytes.get buf 0 in
-        match usr_input, !mode with
-          | 'q', Navigation -> 
-              loop := false;
-              restore_term_state ();
-          | '\n', Navigation ->
-              let selected_dir = List.nth !dirs !focus_idx in 
-              cur_dir := !cur_dir ^ "/" ^ selected_dir;
-              dirs := list_dirs !cur_dir;
-              focus_idx := 0;
-          | '-', Navigation ->
-              cur_dir := !cur_dir ^ "/" ^ "..";
-              dirs := list_dirs !cur_dir;
-              focus_idx := 0;
-          | 'd', Navigation ->
-              let selected_entry = List.nth !dirs !focus_idx in
-              let full_path = !cur_dir ^ "/" ^ selected_entry in
-              let { st_kind = kind } = Unix.stat full_path in
-              mode := begin match kind with
-                | S_REG -> Delete File
-                | S_DIR -> Delete Dir
-                | _ -> failwith "Not handled"
-              end
-          | 'n', Navigation ->
-              mode := Create File;
-          | 'N', Navigation ->
-              mode := Create Dir;
-          | 'y', Delete entry_kind ->
-              let selected_entry = List.nth !dirs !focus_idx in
-              let full_path = !cur_dir ^ "/" ^ selected_entry in
-              begin
-                match entry_kind with
-                | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
-                | File -> unlink full_path;
-              end;
-              focus_idx := !focus_idx - 1;
-              dirs := list_dirs !cur_dir;
-              mode := Navigation;
-          | 'q', Delete _ | 'n', Delete _ -> 
-              mode := Navigation;
-          | '\n', Create kind ->
-              if kind = Dir then (
-                sprintf "mkdir %s" !user_input |> Sys.command |> ignore;
-              ) else (
-                sprintf "touch %s" !user_input |> Sys.command |> ignore;
-              );
-              user_input := "";
-              user_input_view := "";
-              hide_cursor();
-              dirs := list_dirs !cur_dir;
-              mode := Navigation;
-          | key, Create _ ->
-              let user_input_len = String.length !user_input in
-              begin
-                user_input := match key with
-                  | '' when user_input_len > 0 -> 
-                      String.sub !user_input 0 (user_input_len - 1)
-                  | '' when user_input_len = 0 -> 
-                      ""
-                  | _  -> 
-                      !user_input ^ String.make 1 key
-              end;
+      let key = parse_input () in
+      let len = List.length !dirs in
+      match !mode with
+        | Navigation -> (
+            match key with
+            | `Arrow_down ->
+                if !focus_idx < len - 1
+                then focus_idx := !focus_idx + 1
+                else focus_idx := 0
+            | `Arrow_up ->
+                if !focus_idx > 0
+                then focus_idx := !focus_idx - 1
+                else focus_idx := len - 1
+            | `Key 'q' ->
+                loop := false;
+                restore_term_state ()
+            | `Enter ->
+                let selected_dir = List.nth !dirs !focus_idx in 
+                cur_dir := !cur_dir ^ "/" ^ selected_dir;
+                dirs := list_dirs !cur_dir;
+                focus_idx := 0
+            | `Key '-' ->
+                cur_dir := !cur_dir ^ "/" ^ "..";
+                dirs := list_dirs !cur_dir;
+                focus_idx := 0
+            | `Key 'd' ->
+                let selected_entry = List.nth !dirs !focus_idx in
+                let full_path = !cur_dir ^ "/" ^ selected_entry in
+                let { st_kind = kind } = Unix.stat full_path in
+                mode := begin match kind with
+                  | S_REG -> Delete File
+                  | _ -> Delete Dir
+                end
+            | `Key 'n' ->
+                mode := Create File
+            | `Key 'N' ->
+                mode := Create Dir
+            | _ -> ()
+        )
+        | Delete kind -> (
+            match key with
+            | `Enter | `Key 'y' ->
+                let selected_entry = List.nth !dirs !focus_idx in
+                let full_path = !cur_dir ^ "/" ^ selected_entry in
+                begin
+                  match kind with
+                  | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
+                  | File -> unlink full_path;
+                end;
+                focus_idx := !focus_idx - 1;
+                dirs := list_dirs !cur_dir;
+                mode := Navigation
+            | `Key 'q' | `Key 'n' | `Escape -> 
+                mode := Navigation
+            | _ -> ()
+        )
+        | Create kind ->
+          match key with
+            | `Enter ->
+                if kind = Dir then (
+                  sprintf "mkdir %s" !user_input |> Sys.command |> ignore;
+                ) else (
+                  sprintf "touch %s" !user_input |> Sys.command |> ignore;
+                );
+                user_input := "";
+                user_input_view := "";
+                hide_cursor();
+                dirs := list_dirs !cur_dir;
+                mode := Navigation
+            | `Key key ->
+                let user_input_len = String.length !user_input in
+                begin
+                  user_input := match key with
+                    | '' when user_input_len > 0 -> 
+                        String.sub !user_input 0 (user_input_len - 1)
+                    | '' when user_input_len = 0 -> 
+                        ""
+                    | _  -> 
+                        !user_input ^ String.make 1 key
+                end;
 
-              let user_input_len = String.length !user_input in
-              user_input_view :=
-                if user_input_len >= user_input_max_w then
-                  String.sub !user_input (user_input_len - user_input_max_w + 1) (user_input_max_w - 1)
-                else
-                !user_input;
-          | _, _-> ();
+                let user_input_len = String.length !user_input in
+                user_input_view :=
+                  if user_input_len >= user_input_max_w then
+                    String.sub !user_input (user_input_len - user_input_max_w + 1) (user_input_max_w - 1)
+                  else
+                  !user_input
+            | `Escape | `Key 'q' ->
+                mode := Navigation
+            | _ -> ()
     done;
   with
   | Sys.Break -> restore_term_state ();
