@@ -23,26 +23,44 @@ let list_dirs path: string list =
   list_dirs_rec [];;
 
 type color = {r: int; g: int; b: int};;
-let green = {r = 152; g = 195; b = 121};;
-let yellow = {r = 255; g = 209; b = 115};;
+let green = {r = 0; g = 170; b = 00};;
 let white = {r = 255; g = 255; b = 255};;
-let gray = {r = 92; g = 97; b = 101};;
+let gray = {r = 34; g = 34; b = 34};;
 let black = {r = 0; g = 0; b = 0};;
+let yellow = {r = 255; g = 220; b = 0};;
 
 let text_with_color fg bg text =
   sprintf "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m" fg.r fg.g fg.b bg.r bg.g bg.b text;;
 
+let rec pad_right n str =
+  if n = 0 then str
+  else pad_right (n - 1) (str ^ " ");;
+
+let rec pad_left n str =
+  if n = 0 then str
+  else pad_left (n - 1) (" " ^ str);;
+
 let print_dirs list_dirs cur_dir focus_idx =
+  let longest_dir_length =
+    List.fold_left (fun acc dir -> max acc (String.length dir)) 0 list_dirs
+  in
   let print_dir dir_index dir =
     let { st_kind = kind } = Unix.stat (cur_dir ^ "/" ^ dir) in
     let focused = focus_idx == dir_index in
     let fg, bg = match kind, focused with
-    | S_DIR, true -> (yellow, gray)
-    | S_DIR, false -> (yellow, black)
-    | _, true -> (white, gray)
-    | _, false -> (white, black)
+      | S_DIR, true -> (black, yellow)
+      | S_DIR, false -> (yellow, black)
+      | _, true -> (green, gray)
+      | _, false -> (white, black)
     in
-    text_with_color fg bg dir ^ "\n" |> print_string
+      let diff = longest_dir_length - (String.length dir) in
+      let line =
+        if focused then
+          "▸ " ^ dir |> pad_right diff
+        else
+          pad_left 2 dir |> pad_right diff
+      in
+      text_with_color fg bg line ^ "\n" |> print_string
   in
     List.iteri print_dir list_dirs;;
 
