@@ -28,8 +28,9 @@ let white = {r = 255; g = 255; b = 255};;
 let gray = {r = 34; g = 34; b = 34};;
 let black = {r = 0; g = 0; b = 0};;
 let yellow = {r = 255; g = 220; b = 0};;
+let blue = {r = 50; g = 100; b = 255};;
 
-let text_with_color fg bg text =
+let text_with_color ~fg ~bg text =
   sprintf "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m" fg.r fg.g fg.b bg.r bg.g bg.b text;;
 
 let rec pad_right n str =
@@ -40,7 +41,7 @@ let rec pad_left n str =
   if n = 0 then str
   else pad_left (n - 1) (" " ^ str);;
 
-let print_dirs list_dirs cur_dir focus_idx =
+let render_menu list_dirs cur_dir focus_idx =
   let longest_dir_length =
     List.fold_left (fun acc dir -> max acc (String.length dir)) 0 list_dirs
   in
@@ -60,7 +61,7 @@ let print_dirs list_dirs cur_dir focus_idx =
         else
           pad_left 2 dir |> pad_right diff
       in
-      text_with_color fg bg line ^ "\n" |> print_string
+      text_with_color ~fg:fg ~bg:bg line ^ "\n" |> print_string
   in
     List.iteri print_dir list_dirs;;
 
@@ -78,38 +79,38 @@ let restore_terminal old_term =
 let show_cursor () = print_string "\x1b[?25h";;
 let hide_cursor () = print_string "\x1b[?25l";;
 let clear_screen () = print_string "\x1b[48;2;0;0;0m\x1b[2J\x1b[H";;
-let set_cursor_pos ~x ~y = sprintf "\x1b[%d;%dH" y x |> print_string;;
+let move_cursor ~x ~y = sprintf "\x1b[%d;%dH" y x |> print_string;;
 let draw_border x y w h =
-    set_cursor_pos ~x ~y;
-    "╭" |> text_with_color green black |> print_string;
+    move_cursor ~x ~y;
+    "╭" |> text_with_color ~fg:green ~bg:black |> print_string;
 
-    set_cursor_pos ~x:(x+1) ~y;
+    move_cursor ~x:(x+1) ~y;
     for i = 0 to w-1 do
-      "─" |> text_with_color green black |> print_string;
+      "─" |> text_with_color ~fg:green ~bg:black |> print_string;
     done;
 
-    set_cursor_pos ~x:(x+w+1) ~y;
-    "╮" |> text_with_color green black|> print_string;
+    move_cursor ~x:(x+w+1) ~y;
+    "╮" |> text_with_color ~fg:green ~bg:black|> print_string;
 
     for i = 0 to h do
-      set_cursor_pos ~x ~y:(y+h);
-      "│" |> text_with_color green black |> print_string;
+      move_cursor ~x ~y:(y+h);
+      "│" |> text_with_color ~fg:green ~bg:black |> print_string;
     done;
 
-    set_cursor_pos ~x ~y:(y+h+1);
-    "╰" |> text_with_color green black |> print_string;
+    move_cursor ~x ~y:(y+h+1);
+    "╰" |> text_with_color ~fg:green ~bg:black |> print_string;
 
     for i = 0 to h do
-      set_cursor_pos ~x:(x+w+1) ~y:(y+h);
-      "│" |> text_with_color green black |> print_string;
+      move_cursor ~x:(x+w+1) ~y:(y+h);
+      "│" |> text_with_color ~fg:green ~bg:black |> print_string;
     done;
 
-    set_cursor_pos ~x:(x+w+1) ~y:(y+h+1);
-    "╯" |> text_with_color green black |> print_string;
+    move_cursor ~x:(x+w+1) ~y:(y+h+1);
+    "╯" |> text_with_color ~fg:green ~bg:black |> print_string;
 
-    set_cursor_pos ~x:(x+1) ~y:(y+h+1);
+    move_cursor ~x:(x+1) ~y:(y+h+1);
     for i = 0 to w-1 do
-      "─" |> text_with_color green black |> print_string;
+      "─" |> text_with_color ~fg:green ~bg:black |> print_string;
     done;
 
 type key = [
@@ -118,6 +119,7 @@ type key = [
   |`Escape
   |`Enter
   |`Key of char
+  |`Unhandled
 ];;
 
 let parse_input () =
@@ -128,6 +130,7 @@ let parse_input () =
     match input with
      | "\x1b[B" -> `Arrow_down
      | "\x1b[A" -> `Arrow_up
+     | _ -> `Unhandled
   else
     let input = Bytes.get buf 0 in
     match input with
@@ -170,7 +173,10 @@ let () =
   try
     while !loop = true do
       clear_screen ();
-      print_dirs !dirs !cur_dir !focus_idx;
+      move_cursor ~x:1 ~y:1;
+      print_string (text_with_color blue black !cur_dir);
+      move_cursor ~x:1 ~y:2;
+      render_menu !dirs !cur_dir !focus_idx;
 
       let () = match !mode with
         | Delete entry_kind ->
@@ -181,7 +187,7 @@ let () =
             let confirm_msg_x = (term_w - confirm_msg_len) / 2 in
             let confirm_msg_y = term_h / 2 in
             draw_border (confirm_msg_x-1) (confirm_msg_y-1) confirm_msg_len 1;
-            set_cursor_pos ~x:confirm_msg_x ~y:confirm_msg_y;
+            move_cursor ~x:confirm_msg_x ~y:confirm_msg_y;
             print_string confirm_msg;
           end;
         | Create entry_kind ->
@@ -191,14 +197,14 @@ let () =
 
             draw_border (input_x-1) (input_y-1) user_input_max_w 1;
 
-            set_cursor_pos ~x:(input_x+1) ~y:(input_y-1);
+            move_cursor ~x:(input_x+1) ~y:(input_y-1);
             let label = match entry_kind with
               | Dir -> "Create directory"
               | File -> "Create file"
             in
-            label |> text_with_color green black |> print_string;
+            label |> text_with_color ~fg:green ~bg:black |> print_string;
 
-            set_cursor_pos ~x:input_x ~y:input_y;
+            move_cursor ~x:input_x ~y:input_y;
             print_string !user_input_view;
 
             show_cursor ();
@@ -208,6 +214,12 @@ let () =
       flush stdout;
       let key = parse_input () in
       let len = List.length !dirs in
+      let go_up_one_directory () =
+        let last_slash_index = String.rindex !cur_dir '/' in
+        cur_dir := String.sub !cur_dir 0 last_slash_index;
+        dirs := list_dirs !cur_dir;
+        focus_idx := 0
+      in
       match !mode with
         | Navigation -> (
             match key with
@@ -224,13 +236,14 @@ let () =
                 restore_term_state ()
             | `Enter ->
                 let selected_dir = List.nth !dirs !focus_idx in
-                cur_dir := !cur_dir ^ "/" ^ selected_dir;
-                dirs := list_dirs !cur_dir;
-                focus_idx := 0
+                if selected_dir = ".."
+                  then go_up_one_directory ()
+                else
+                  cur_dir := !cur_dir ^ "/" ^ selected_dir;
+                  dirs := list_dirs !cur_dir;
+                  focus_idx := 0
             | `Key '-' ->
-                cur_dir := !cur_dir ^ "/" ^ "..";
-                dirs := list_dirs !cur_dir;
-                focus_idx := 0
+                go_up_one_directory ()
             | `Key 'd' ->
                 let selected_entry = List.nth !dirs !focus_idx in
                 let full_path = !cur_dir ^ "/" ^ selected_entry in
@@ -249,14 +262,13 @@ let () =
             match key with
             | `Enter | `Key 'y' ->
                 let selected_entry = List.nth !dirs !focus_idx in
-                let full_path = !cur_dir ^ "/" ^ selected_entry in
-                let processed_path = process_input selected_entry in
+                let full_path = !cur_dir ^ "/" ^ process_input selected_entry in
                 begin
                   match kind with
-                  | Dir -> sprintf "rm -rf %s" processed_path |> Sys.command |> ignore;
-                  | File -> sprintf "rm %s" processed_path |> Sys.command |> ignore;
+                  | Dir -> sprintf "rm -rf %s" full_path |> Sys.command |> ignore;
+                  | File -> sprintf "rm %s" full_path |> Sys.command |> ignore;
                 end;
-                focus_idx := !focus_idx - 1;
+                focus_idx := Stdlib.max 0 (!focus_idx - 1);
                 dirs := list_dirs !cur_dir;
                 mode := Navigation
             | `Key 'q' | `Key 'n' | `Escape ->
@@ -266,11 +278,11 @@ let () =
         | Create kind ->
           match key with
             | `Enter ->
-                let processed_input = process_input !user_input in
+                let full_path = !cur_dir ^ "/" ^ process_input !user_input in
                 if kind = Dir then (
-                  sprintf "mkdir %s" processed_input |> Sys.command |> ignore
+                  sprintf "mkdir %s" full_path |> Sys.command |> ignore
                 ) else (
-                  sprintf "touch %s" processed_input |> Sys.command |> ignore
+                  sprintf "touch %s" full_path |> Sys.command |> ignore
                 );
 
                 user_input := "";
@@ -297,6 +309,7 @@ let () =
                   else
                   !user_input
             | `Escape | `Key 'q' ->
+                hide_cursor ();
                 mode := Navigation
             | _ -> ()
     done;
